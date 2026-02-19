@@ -4,6 +4,15 @@ A Docker container that connects to your Plex Media Server and automatically del
 
 ---
 
+## Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) (v20.10+)
+- [Docker Compose](https://docs.docker.com/compose/install/) (v2.0+ — included with Docker Desktop)
+- A running Plex Media Server reachable over HTTP
+- A Plex auth token ([how to find yours](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/))
+
+---
+
 ## How It Works
 
 Plex accumulates posters over time as you upload artwork, refresh metadata, or change posters. Each media item can store many posters, but only one is displayed. This tool:
@@ -54,32 +63,52 @@ This container makes **outbound** HTTP requests to your Plex server — it does 
 
 ## Deploying with Docker
 
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/djnw8fs748-eng/plex-poster-manager.git
+cd plex-poster-manager
+```
+
+### 2. Configure your environment
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and set at minimum `PLEX_URL` and `PLEX_TOKEN`. See the [Configuration](#configuration) table above for all options.
+
+### 3. Build the Docker image
+
+Run this from the repository root (the directory containing the `Dockerfile`):
+
+```bash
+docker build -t plex-poster-manager .
+```
+
+To confirm the image was built:
+
+```bash
+docker images plex-poster-manager
+```
+
+---
+
 ### One-shot (run once and exit)
 
 Suitable for use with an external scheduler such as host cron, Kubernetes CronJob, or Unraid user scripts.
 
 ```bash
-# Build
-docker build -t plex-poster-manager .
-
-# Run
 docker run --rm --env-file .env plex-poster-manager
 ```
 
+The `--rm` flag removes the container automatically after it exits.
+
+---
+
 ### Scheduled (container stays running)
 
-Set `SCHEDULE_CRON` in your `.env` and use Docker Compose. The container will run an initial pass on startup, then repeat on the defined schedule.
-
-```bash
-# Start
-docker compose up -d
-
-# View logs
-docker compose logs -f
-
-# Stop
-docker compose down
-```
+Set `SCHEDULE_CRON` in your `.env`, then use Docker Compose. The container runs an initial pass on startup and repeats on the defined schedule.
 
 **Example `.env` for nightly runs at 3am:**
 ```env
@@ -88,6 +117,38 @@ PLEX_TOKEN=your_token_here
 DRY_RUN=false
 SCHEDULE_CRON=0 3 * * *
 LOG_LEVEL=INFO
+```
+
+```bash
+# Build and start in the background
+docker compose up -d --build
+
+# Confirm the container is running
+docker compose ps
+
+# Stream logs
+docker compose logs -f
+
+# Stop the container
+docker compose down
+```
+
+---
+
+### Rebuilding after changes
+
+If you update your `.env` or pull new code, rebuild and restart:
+
+```bash
+docker compose down
+docker compose up -d --build
+```
+
+Or for a plain `docker run` workflow:
+
+```bash
+docker build -t plex-poster-manager .
+docker run --rm --env-file .env plex-poster-manager
 ```
 
 ---
@@ -106,15 +167,18 @@ docker run --rm \
 
 ---
 
-## Building Locally
+## Running Locally (without Docker)
 
-Requires Python 3.12+ and the dependencies in `requirements.txt`.
+Requires Python 3.12+ and pip.
 
 ```bash
 pip install -r requirements.txt
 
-# Run with env vars
-PLEX_URL=http://... PLEX_TOKEN=... python src/main.py
+# Run with env vars inline
+PLEX_URL=http://192.168.1.10:32400 PLEX_TOKEN=your_token_here python src/main.py
+
+# Or load from a .env file
+export $(cat .env | xargs) && python src/main.py
 ```
 
 ---
