@@ -1,0 +1,11 @@
+services:
+  plex-poster-manager:
+    build: .
+    image: plex-poster-manager:latest
+    container_name: plex-poster-manager
+    restart: unless-stopped
+    env_file:
+      - .env
+    # This container is a Plex API client — it makes outbound HTTP requests
+    # to your Plex server and does not expose any inbound ports itself.
+    # Ensure PLEX_URL in your .env points to your Plex server (default port 32400).
