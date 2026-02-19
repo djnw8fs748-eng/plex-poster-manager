@@ -8,7 +8,7 @@ A Docker container that connects to your Plex Media Server and automatically del
 
 - [Docker](https://docs.docker.com/get-docker/) (v20.10+)
 - [Docker Compose](https://docs.docker.com/compose/install/) (v2.0+ — included with Docker Desktop)
-- A running Plex Media Server reachable over HTTP
+- A running Plex Media Server reachable from the Docker host (HTTPS recommended — see [Security note](#security-note) below)
 - A Plex auth token ([how to find yours](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/))
 
 ---
@@ -17,7 +17,7 @@ A Docker container that connects to your Plex Media Server and automatically del
 
 Plex accumulates posters over time as you upload artwork, refresh metadata, or change posters. Each media item can store many posters, but only one is displayed. This tool:
 
-1. Connects to your Plex server over HTTP using a personal auth token
+1. Connects to your Plex server over HTTP or HTTPS using a personal auth token
 2. Iterates over your configured libraries (or all libraries by default)
 3. For each media item, fetches the full list of posters via the Plex API
 4. Deletes every poster **except** the currently selected one
@@ -177,9 +177,22 @@ pip install -r requirements.txt
 # Run with env vars inline
 PLEX_URL=http://192.168.1.10:32400 PLEX_TOKEN=your_token_here python src/main.py
 
-# Or load from a .env file
-export $(cat .env | xargs) && python src/main.py
+# Or create a .env file and let python-dotenv load it automatically
+cp .env.example .env   # fill in your values
+python src/main.py
 ```
+
+> **Note:** Do not use `export $(cat .env | xargs)` to load `.env` — this is vulnerable to shell injection if your token contains special characters. The app uses `python-dotenv` to load `.env` safely.
+
+---
+
+## Security Note
+
+The `PLEX_TOKEN` is a long-lived credential that grants full access to your Plex server. To protect it:
+
+- **Use HTTPS** where possible (`PLEX_URL=https://...`). When using HTTP, the token travels in plaintext over the network. The app will log a warning if HTTP is detected.
+- **Never commit `.env`** — the repo includes a `.gitignore` that excludes it. Double-check with `git status` before pushing.
+- **Use `DRY_RUN=true`** to audit what will be deleted before running for real.
 
 ---
 
@@ -188,3 +201,4 @@ export $(cat .env | xargs) && python src/main.py
 - **The selected poster is never deleted.** Only posters not currently selected are removed.
 - **Dry-run mode** lets you audit all planned deletions before committing.
 - All deletions are logged with the item name, poster key, and timestamp.
+- Authentication failures (HTTP 401/403) abort the run immediately with a clear error rather than silently continuing.
