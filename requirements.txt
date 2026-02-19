@@ -1,3 +1,29 @@
-requests==2.32.3
-apscheduler==3.10.4
-python-dotenv==1.0.1
+# Locked and hash-verified dependencies.
+# Regenerate with:
+#   pip download requests==2.32.5 apscheduler==3.10.4 python-dotenv==1.0.1 \
+#     -d /tmp/pkgs --platform manylinux2014_x86_64 --only-binary=:all: \
+#     --python-version 3.12 && pip hash /tmp/pkgs/*
+
+# Direct dependencies
+requests==2.32.5 \
+    --hash=sha256:2462f94637a34fd532264295e186976db0f5d453d1cdd31473c85a6a161affb6
+apscheduler==3.10.4 \
+    --hash=sha256:fb91e8a768632a4756a585f79ec834e0e27aad5860bac7eaa523d9ccefd87661
+python-dotenv==1.0.1 \
+    --hash=sha256:f7b63ef50f1b690dddf550d03497b66d609393b40b564ed0d674909a68ebf16a
+
+# Transitive dependencies
+certifi==2026.1.4 \
+    --hash=sha256:9943707519e4add1115f44c2bc244f782c0249876bf51b6599fee1ffbedd685c
+charset-normalizer==3.4.4 \
+    --hash=sha256:11d694519d7f29d6cd09f6ac70028dba10f92f6cdd059096db198c283794ac86
+idna==3.11 \
+    --hash=sha256:771a87f49d9defaf64091e6e6fe9c18d4833f140bd19464795bc32d966ca37ea
+pytz==2025.2 \
+    --hash=sha256:5ddf76296dd8c44c26eb8f4b6f35488f3ccbf6fbbd7adee0b7262d43f0ec2f00
+six==1.17.0 \
+    --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
+tzlocal==5.3.1 \
+    --hash=sha256:eb1a66c3ef5847adf7a834f1be0800581b683b5608e74f86ecbcef8ab91bb85d
+urllib3==2.6.3 \
+    --hash=sha256:bf272323e553dfb2e87d9bfd225ca7b0f467b919d7bbd355436d3fd37cb0acd4
