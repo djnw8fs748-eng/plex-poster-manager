@@ -51,7 +51,7 @@ cp .env.example .env
 | `PLEX_LIBRARIES` | No | all | Comma-separated library names or IDs to process. Leave empty for all libraries. |
 | `DRY_RUN` | No | `false` | Set to `true` to log what would be deleted without deleting anything |
 | `SCHEDULE_CRON` | No | — | Cron expression for scheduled runs (e.g. `0 3 * * *`). If unset, runs once and exits. |
-| `LOG_LEVEL` | No | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `LOG_LEVEL` | No | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
 
 ---
 
@@ -171,8 +171,10 @@ docker run --rm \
 
 Requires Python 3.12+ and pip.
 
+> **Note:** `requirements.txt` is hash-locked for the Linux/Docker platform. Installing it directly on macOS will fail the hash check for platform-specific packages (e.g. `charset-normalizer`). Install without hash verification for local dev:
+
 ```bash
-pip install -r requirements.txt
+pip install requests==2.32.5 apscheduler==3.10.4 python-dotenv==1.0.1
 
 # Run with env vars inline
 PLEX_URL=http://192.168.1.10:32400 PLEX_TOKEN=your_token_here python src/main.py
@@ -183,6 +185,27 @@ python src/main.py
 ```
 
 > **Note:** Do not use `export $(cat .env | xargs)` to load `.env` — this is vulnerable to shell injection if your token contains special characters. The app uses `python-dotenv` to load `.env` safely.
+
+---
+
+## Updating Dependencies
+
+`requirements.txt` is fully hash-locked for supply-chain integrity. When you need to bump a package version, regenerate the hashes targeting the Linux Docker platform:
+
+```bash
+# Download the new packages for Linux/Python 3.12
+pip download <package>==<new-version> \
+  -d /tmp/pkgs \
+  --platform manylinux2014_x86_64 \
+  --only-binary=:all: \
+  --python-version 3.12
+
+# Generate hashes
+pip hash /tmp/pkgs/*
+
+# Update requirements.txt with the new version and hash, then rebuild
+docker build -t plex-poster-manager .
+```
 
 ---
 
