@@ -22,7 +22,8 @@ def _safe_id(value: Any, name: str) -> str:
 def _safe_poster_key(value: str, name: str) -> str:
     """
     Validate a poster key from the Plex API before using it in a request.
-    Accepts internal Plex paths (/library/...) and external HTTP/HTTPS URLs.
+    Accepts internal Plex paths (/library/...), upload:// keys for locally
+    uploaded posters, and external HTTP/HTTPS URLs.
     """
     if not isinstance(value, str) or not value:
         raise ValueError(f"Invalid {name}: empty or non-string value")
@@ -31,6 +32,13 @@ def _safe_poster_key(value: str, name: str) -> str:
         # Internal Plex path — reject path traversal attempts
         if ".." in value.split("/"):
             raise ValueError(f"Invalid {name}: path traversal detected in {value!r}")
+        return value
+
+    if value.startswith("upload://"):
+        # Locally uploaded poster key — allow only safe path characters
+        rest = value[len("upload://"):]
+        if not re.match(r'^[a-zA-Z0-9/_.-]+$', rest):
+            raise ValueError(f"Invalid {name}: unsafe characters in upload key {value!r}")
         return value
 
     if value.startswith(("http://", "https://")):
@@ -84,4 +92,14 @@ class PlexClient:
     def delete_poster(self, rating_key: str, poster_key: str) -> None:
         rk = _safe_id(rating_key, "rating_key")
         pk = _safe_poster_key(poster_key, "poster_key")
+        # For locally uploaded posters, the listing returns an internal path like
+        # /library/metadata/{id}/file?url=upload%3A%2F%2Fposters%2F{hash}.
+        # The delete endpoint requires the bare upload:// URL as the `url`
+        # parameter, so extract it from the query string when present.
+        if pk.startswith("/"):
+            parsed = urllib.parse.urlparse(pk)
+            qs = urllib.parse.parse_qs(parsed.query)
+            inner_url = qs.get("url", [None])[0]
+            if inner_url and inner_url.startswith("upload://"):
+                pk = _safe_poster_key(inner_url, "poster_key")
         self._delete(f"/library/metadata/{rk}/posters", url=pk)
