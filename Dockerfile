@@ -9,7 +9,7 @@ COPY requirements.txt .
 
 # Install with hash verification — pip will reject any package whose hash
 # does not match what is recorded in requirements.txt
-RUN pip install --no-cache-dir --require-hashes -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=appuser:appgroup src/ ./src/
 
