@@ -14,7 +14,6 @@ or, if installed as an entry-point:
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Optional, Set
 
@@ -22,7 +21,6 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -285,9 +283,9 @@ class PlexPosterApp(App):
     # ── Instance state (not reactive — plain attributes to avoid issues
     #    with Textual's reactive + mutable containers) ─────────────────────
 
-    def __init__(self) -> None:
+    def __init__(self, initial_path: Optional[Path] = None) -> None:
         super().__init__()
-        self._scan_path: Optional[Path] = None
+        self._scan_path: Optional[Path] = initial_path
         self._root_node: Optional[FolderNode] = None
         self._current_folder: Optional[FolderNode] = None
         # Set of absolute Path objects the user has marked for deletion.
@@ -336,12 +334,15 @@ class PlexPosterApp(App):
         self.query_one("#loading", LoadingIndicator).display = False
         self._update_delete_button()
 
-        # Auto-detect Plex data directory and start scanning if it exists.
-        default = get_default_plex_path()
-        if default and default.exists():
-            self._start_scan(default)
+        # Use initial_path (e.g. from tests), then auto-detect, then ask.
+        if self._scan_path:
+            self._start_scan(self._scan_path)
         else:
-            self.push_screen(ConfigScreen(), self._on_path_chosen)
+            default = get_default_plex_path()
+            if default and default.exists():
+                self._start_scan(default)
+            else:
+                self.push_screen(ConfigScreen(), self._on_path_chosen)
 
     # ── Scanning ─────────────────────────────────────────────────────────────
 
