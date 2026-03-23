@@ -37,8 +37,8 @@ extension-less files by reading their magic bytes.
 
 ## Requirements
 
-- **Python 3.10 or newer**
-- The [`textual`](https://textual.textualize.io/) library (`>= 0.70`)
+- **Python 3.10 or newer** (Python 3.12+ recommended)
+- All Python dependencies are installed automatically by `pip install .` — no manual dependency management needed
 
 No Plex server connection is required — everything is read directly from disk.
 
@@ -46,24 +46,40 @@ No Plex server connection is required — everything is read directly from disk.
 
 ## Installation
 
-### 1 — Clone or download
+### 1 — Clone
 
 ```
 git clone https://github.com/djnw8fs748-eng/plex-poster-manager.git
 cd plex-poster-manager/local-tui
 ```
 
-### 2 — Install dependencies
+### 2 — Install (all dependencies included)
 
 ```
-pip install -r requirements.txt
+pip install .
 ```
+
+This installs `textual`, `requests`, and everything else the app needs, and
+adds a `plex-poster` command to your PATH.
 
 > **Tip (Windows):** Open a Command Prompt or PowerShell window, `cd` into the
 > `local-tui` folder, then run the pip command above.  Python 3.10+ must be in
 > your `PATH`.
 
+> **Tip:** Use a virtual environment to keep dependencies isolated:
+> ```
+> python -m venv .venv
+> source .venv/bin/activate   # Windows: .venv\Scripts\activate
+> pip install .
+> ```
+
 ### 3 — Run
+
+```
+plex-poster
+```
+
+Or without installing:
 
 ```
 python app.py
@@ -131,7 +147,7 @@ Click any row with the mouse to toggle its selection.
 
 ## Step-by-step: cleaning your poster cache
 
-1. Launch the app: `python app.py`
+1. Launch the app: `plex-poster` (or `python app.py` if you skipped `pip install .`)
 2. If the path dialog appears, enter your Plex metadata directory and press
    **Scan**.  (The Windows default is usually auto-detected.)
 3. Expand `Movies` or `TV Shows` in the left tree and click a bundle folder to
@@ -164,8 +180,19 @@ Press `Ctrl+O` at any time to open the path dialog.  You can point the app at:
 | "Path not found" error on launch | Press `Ctrl+O` and manually enter the correct metadata path |
 | Posters are not showing up | Make sure you are pointing at the **Metadata** folder, not the Plex data root |
 | `Permission denied` errors | On Windows, close Plex Media Server before deleting files from its cache |
-| `textual` not found | Run `pip install textual>=0.70.0` |
+| `textual` not found | Run `pip install .` from the `local-tui` folder |
+| `requests` not found | Run `pip install .` from the `local-tui` folder |
 | App display looks broken | Use a terminal that supports Unicode and at least 80 columns (Windows Terminal, iTerm2, etc.) |
+
+---
+
+## Running the tests
+
+```bash
+cd plex-poster-manager/local-tui
+pip install ".[dev]"
+pytest
+```
 
 ---
 

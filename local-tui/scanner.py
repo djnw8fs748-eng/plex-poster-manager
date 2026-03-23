@@ -57,7 +57,7 @@ class PosterFile:
             if size < 1024:
                 return f"{size:.1f} {unit}"
             size /= 1024
-        return f"{size:.1f} GB"
+        return f"{size:.1f} TB"
 
     @property
     def modified_str(self) -> str:

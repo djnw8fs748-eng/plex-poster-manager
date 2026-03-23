@@ -219,6 +219,22 @@ The `PLEX_TOKEN` is a long-lived credential that grants full access to your Plex
 
 ---
 
+## Local TUI (no Docker required)
+
+If you prefer to browse and delete posters interactively without Docker, the
+`local-tui/` folder contains a standalone terminal UI that reads directly from
+disk — no Plex server connection needed.
+
+```bash
+cd local-tui
+pip install .
+plex-poster
+```
+
+See [`local-tui/README.md`](local-tui/README.md) for full details.
+
+---
+
 ## Safety
 
 - **The selected poster is never deleted.** Only posters not currently selected are removed.

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plex-poster-manager"
+version = "1.0.0"
+description = "Terminal UI for browsing and deleting Plex local poster cache"
+requires-python = ">=3.10"
+dependencies = [
+    "textual>=0.70.0",
+    "requests>=2.31.0",
+]
+
+[project.scripts]
+plex-poster = "app:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.setuptools]
+py-modules = ["app", "plex", "scanner"]

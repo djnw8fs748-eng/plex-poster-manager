@@ -1,4 +1,5 @@
 textual>=0.70.0
+requests>=2.31.0
 
 # Testing
 pytest>=8.0
