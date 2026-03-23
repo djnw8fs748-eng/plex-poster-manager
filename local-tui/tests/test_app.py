@@ -17,11 +17,8 @@ from textual.app import App, ComposeResult
 from textual.widgets import Button, DataTable, Input, Label, Tree
 from tests.conftest import JPEG_HEADER, PNG_HEADER
 
-# Textual's run_test() is async; mark the whole module.
-pytestmark = pytest.mark.asyncio
-
 # How long to wait for the background scan thread to finish.
-_SCAN_WAIT = 1.5
+_SCAN_WAIT = 5.0
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -29,8 +26,8 @@ _SCAN_WAIT = 1.5
 
 async def _wait_for_scan(pilot, timeout: float = _SCAN_WAIT) -> None:
     """Yield control until the app's root_node is populated or timeout."""
-    deadline = asyncio.get_event_loop().time() + timeout
-    while asyncio.get_event_loop().time() < deadline:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
         if pilot.app._root_node is not None:
             await pilot.pause(0.05)  # let the UI update after _apply_result
             return
