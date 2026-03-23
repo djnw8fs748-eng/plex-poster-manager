@@ -369,36 +369,51 @@ class TestParseInfoXml:
     def test_reads_title_and_year(self, tmp_path):
         f = tmp_path / "Info.xml"
         f.write_text('<Video title="Inception" year="2010"/>', encoding="utf-8")
-        assert _parse_info_xml(f) == ("Inception", 2010)
+        title, year, rk = _parse_info_xml(f)
+        assert (title, year) == ("Inception", 2010)
+
+    def test_reads_rating_key(self, tmp_path):
+        f = tmp_path / "Info.xml"
+        f.write_text('<Video title="Dune" year="2021" ratingKey="42"/>', encoding="utf-8")
+        _, _, rk = _parse_info_xml(f)
+        assert rk == "42"
 
     def test_reads_title_without_year(self, tmp_path):
         f = tmp_path / "Info.xml"
         f.write_text('<Directory title="Breaking Bad"/>', encoding="utf-8")
-        assert _parse_info_xml(f) == ("Breaking Bad", None)
+        title, year, _ = _parse_info_xml(f)
+        assert (title, year) == ("Breaking Bad", None)
 
     def test_falls_back_to_name_attribute(self, tmp_path):
         f = tmp_path / "Info.xml"
         f.write_text('<Media name="Fallback Title" year="2000"/>', encoding="utf-8")
-        assert _parse_info_xml(f) == ("Fallback Title", 2000)
+        title, year, _ = _parse_info_xml(f)
+        assert (title, year) == ("Fallback Title", 2000)
 
     def test_returns_none_for_missing_file(self, tmp_path):
-        assert _parse_info_xml(tmp_path / "nonexistent.xml") == (None, None)
+        assert _parse_info_xml(tmp_path / "nonexistent.xml") == (None, None, None)
 
     def test_returns_none_for_malformed_xml(self, tmp_path):
         f = tmp_path / "Info.xml"
         f.write_text("not xml at all <<<", encoding="utf-8")
-        assert _parse_info_xml(f) == (None, None)
+        assert _parse_info_xml(f) == (None, None, None)
 
     def test_returns_none_when_no_title_attribute(self, tmp_path):
         f = tmp_path / "Info.xml"
         f.write_text('<Video year="2010"/>', encoding="utf-8")
-        assert _parse_info_xml(f) == (None, None)
+        assert _parse_info_xml(f) == (None, None, None)
 
 
 class TestReadBundleInfo:
     def test_reads_combined_info_xml(self, tmp_path):
         bundle = _make_bundle(tmp_path, '<Video title="The Matrix" year="1999"/>')
-        assert _read_bundle_info(bundle) == ("The Matrix", 1999)
+        title, year, _ = _read_bundle_info(bundle)
+        assert (title, year) == ("The Matrix", 1999)
+
+    def test_reads_rating_key_from_xml(self, tmp_path):
+        bundle = _make_bundle(tmp_path, '<Video title="X" year="2022" ratingKey="99"/>')
+        _, _, rk = _read_bundle_info(bundle)
+        assert rk == "99"
 
     def test_falls_back_to_agent_directory(self, tmp_path):
         bundle = tmp_path / "abc.bundle"
@@ -407,17 +422,18 @@ class TestReadBundleInfo:
         (agent_dir / "Info.xml").write_text(
             '<Video title="Dune" year="2021"/>', encoding="utf-8"
         )
-        assert _read_bundle_info(bundle) == ("Dune", 2021)
+        title, year, _ = _read_bundle_info(bundle)
+        assert (title, year) == ("Dune", 2021)
 
     def test_returns_none_for_empty_bundle(self, tmp_path):
         bundle = tmp_path / "empty.bundle"
         bundle.mkdir()
-        assert _read_bundle_info(bundle) == (None, None)
+        assert _read_bundle_info(bundle) == (None, None, None)
 
     def test_returns_none_when_no_contents_dir(self, tmp_path):
         bundle = tmp_path / "no_contents.bundle"
         bundle.mkdir()
-        assert _read_bundle_info(bundle) == (None, None)
+        assert _read_bundle_info(bundle) == (None, None, None)
 
 
 class TestBundleTitleInScan:
@@ -449,6 +465,19 @@ class TestBundleTitleInScan:
         (tmp_path / "poster.jpg").write_bytes(JPEG_HEADER)
         root = scan_directory(tmp_path, check_magic_bytes=False)
         assert root.posters[0].media_title == ""
+
+    def test_folder_node_has_rating_key(self, tmp_path):
+        bundle = _make_bundle(tmp_path, '<Video title="X" year="2000" ratingKey="77"/>')
+        (bundle / "Contents" / "_combined" / "poster.jpg").write_bytes(JPEG_HEADER)
+        root = scan_directory(tmp_path, check_magic_bytes=False)
+        bundle_node = next(c for c in root.children if c.name == "abc123.bundle")
+        assert bundle_node.rating_key == "77"
+
+    def test_poster_is_plex_selected_defaults_false(self, tmp_path):
+        bundle = _make_bundle(tmp_path, '<Video title="X" year="2000"/>')
+        (bundle / "Contents" / "_combined" / "poster.jpg").write_bytes(JPEG_HEADER)
+        root = scan_directory(tmp_path, check_magic_bytes=False)
+        assert all(not p.is_plex_selected for p in root.all_posters())
 
     def test_display_name_falls_back_to_folder_name(self, tmp_path):
         bundle = tmp_path / "xyz999.bundle"

@@ -44,7 +44,8 @@ class PosterFile:
     path: Path
     size: int          # bytes
     modified: datetime
-    media_title: str = ""   # e.g. "The Dark Knight (2008)" from the parent bundle
+    media_title: str = ""    # e.g. "The Dark Knight (2008)" from the parent bundle
+    is_plex_selected: bool = False  # True when Plex has this as the active poster
 
     # ── Formatting helpers ──────────────────────────────────────────────────
 
@@ -76,6 +77,7 @@ class FolderNode:
     children: List["FolderNode"] = field(default_factory=list)
     media_title: Optional[str] = None   # resolved from Info.xml inside the bundle
     media_year: Optional[int] = None
+    rating_key: Optional[str] = None   # Plex ratingKey from Info.xml
 
     @property
     def display_name(self) -> str:
@@ -179,10 +181,11 @@ def scan_directory(
         # Only the outermost bundle is used (bundle_title="" means not yet inside one).
         current_title = bundle_title
         if path.name.endswith(".bundle") and not bundle_title:
-            title, year = _read_bundle_info(path)
+            title, year, rating_key = _read_bundle_info(path)
             if title:
                 node.media_title = title
                 node.media_year = year
+                node.rating_key = rating_key
                 current_title = f"{title} ({year})" if year else title
 
         if progress_cb:
@@ -240,19 +243,21 @@ def _is_image(path: Path, check_magic: bool) -> bool:
     return False
 
 
-def _read_bundle_info(bundle_path: Path) -> Tuple[Optional[str], Optional[int]]:
+def _read_bundle_info(
+    bundle_path: Path,
+) -> Tuple[Optional[str], Optional[int], Optional[str]]:
     """
-    Try to extract a media title and year from a Plex .bundle directory.
+    Try to extract a media title, year, and Plex ratingKey from a .bundle directory.
 
     Plex stores per-item metadata in XML files inside the bundle's Contents
     sub-directory.  We check the combined cache first, then fall back to any
     agent-specific Info.xml we can find.
 
-    Returns (title, year) or (None, None) if nothing readable is found.
+    Returns (title, year, rating_key) or (None, None, None) if nothing readable.
     """
     contents = bundle_path / "Contents"
     if not contents.is_dir():
-        return None, None
+        return None, None, None
 
     # Prefer the combined/cached copy; fall back to any agent directory.
     candidates: List[Path] = [contents / "_combined" / "Info.xml"]
@@ -265,30 +270,34 @@ def _read_bundle_info(bundle_path: Path) -> Tuple[Optional[str], Optional[int]]:
 
     for xml_path in candidates:
         if xml_path.is_file():
-            title, year = _parse_info_xml(xml_path)
+            title, year, rating_key = _parse_info_xml(xml_path)
             if title:
-                return title, year
+                return title, year, rating_key
 
-    return None, None
+    return None, None, None
 
 
-def _parse_info_xml(path: Path) -> Tuple[Optional[str], Optional[int]]:
+def _parse_info_xml(
+    path: Path,
+) -> Tuple[Optional[str], Optional[int], Optional[str]]:
     """
-    Parse a Plex Info.xml file and return (title, year).
+    Parse a Plex Info.xml file and return (title, year, rating_key).
 
     Plex's XML root element varies by agent (Video, Directory, Movie, …)
-    but always carries ``title`` and optionally ``year`` as attributes.
+    but always carries ``title``, optionally ``year``, and usually
+    ``ratingKey`` as attributes.
     """
     try:
         root = ET.parse(path).getroot()  # noqa: S314  (local trusted file)
         title = root.get("title") or root.get("name")
         if not title:
-            return None, None
+            return None, None, None
         year_str = root.get("year", "")
         year = int(year_str) if year_str.isdigit() else None
-        return title, year
+        rating_key = root.get("ratingKey") or root.get("id") or None
+        return title, year, rating_key
     except Exception:  # noqa: BLE001
-        return None, None
+        return None, None, None
 
 
 def _check_magic_bytes(path: Path) -> bool:
