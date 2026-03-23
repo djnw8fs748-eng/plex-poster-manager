@@ -19,6 +19,8 @@ from scanner import (
     PosterFile,
     _check_magic_bytes,
     _is_image,
+    _parse_info_xml,
+    _read_bundle_info,
     get_default_plex_path,
     scan_directory,
 )
@@ -347,6 +349,115 @@ class TestScanDirectory:
     def test_accepts_string_path(self, flat_image_dir):
         root = scan_directory(str(flat_image_dir), check_magic_bytes=False)
         assert root.total_posters == 3
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bundle title resolution
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _make_bundle(tmp_path: Path, xml_content: str) -> Path:
+    """Create a minimal .bundle structure with an Info.xml."""
+    bundle = tmp_path / "abc123.bundle"
+    combined = bundle / "Contents" / "_combined"
+    combined.mkdir(parents=True)
+    (combined / "Info.xml").write_text(xml_content, encoding="utf-8")
+    return bundle
+
+
+class TestParseInfoXml:
+    def test_reads_title_and_year(self, tmp_path):
+        f = tmp_path / "Info.xml"
+        f.write_text('<Video title="Inception" year="2010"/>', encoding="utf-8")
+        assert _parse_info_xml(f) == ("Inception", 2010)
+
+    def test_reads_title_without_year(self, tmp_path):
+        f = tmp_path / "Info.xml"
+        f.write_text('<Directory title="Breaking Bad"/>', encoding="utf-8")
+        assert _parse_info_xml(f) == ("Breaking Bad", None)
+
+    def test_falls_back_to_name_attribute(self, tmp_path):
+        f = tmp_path / "Info.xml"
+        f.write_text('<Media name="Fallback Title" year="2000"/>', encoding="utf-8")
+        assert _parse_info_xml(f) == ("Fallback Title", 2000)
+
+    def test_returns_none_for_missing_file(self, tmp_path):
+        assert _parse_info_xml(tmp_path / "nonexistent.xml") == (None, None)
+
+    def test_returns_none_for_malformed_xml(self, tmp_path):
+        f = tmp_path / "Info.xml"
+        f.write_text("not xml at all <<<", encoding="utf-8")
+        assert _parse_info_xml(f) == (None, None)
+
+    def test_returns_none_when_no_title_attribute(self, tmp_path):
+        f = tmp_path / "Info.xml"
+        f.write_text('<Video year="2010"/>', encoding="utf-8")
+        assert _parse_info_xml(f) == (None, None)
+
+
+class TestReadBundleInfo:
+    def test_reads_combined_info_xml(self, tmp_path):
+        bundle = _make_bundle(tmp_path, '<Video title="The Matrix" year="1999"/>')
+        assert _read_bundle_info(bundle) == ("The Matrix", 1999)
+
+    def test_falls_back_to_agent_directory(self, tmp_path):
+        bundle = tmp_path / "abc.bundle"
+        agent_dir = bundle / "Contents" / "com.plexapp.agents.tmdb_8.0"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "Info.xml").write_text(
+            '<Video title="Dune" year="2021"/>', encoding="utf-8"
+        )
+        assert _read_bundle_info(bundle) == ("Dune", 2021)
+
+    def test_returns_none_for_empty_bundle(self, tmp_path):
+        bundle = tmp_path / "empty.bundle"
+        bundle.mkdir()
+        assert _read_bundle_info(bundle) == (None, None)
+
+    def test_returns_none_when_no_contents_dir(self, tmp_path):
+        bundle = tmp_path / "no_contents.bundle"
+        bundle.mkdir()
+        assert _read_bundle_info(bundle) == (None, None)
+
+
+class TestBundleTitleInScan:
+    def test_folder_node_has_media_title(self, tmp_path):
+        bundle = _make_bundle(tmp_path, '<Video title="Blade Runner" year="1982"/>')
+        (bundle / "Contents" / "_combined" / "poster.jpg").write_bytes(JPEG_HEADER)
+        root = scan_directory(tmp_path, check_magic_bytes=False)
+        bundle_node = next(
+            c for c in root.children if c.name == "abc123.bundle"
+        )
+        assert bundle_node.media_title == "Blade Runner"
+        assert bundle_node.media_year == 1982
+
+    def test_folder_node_display_name(self, tmp_path):
+        bundle = _make_bundle(tmp_path, '<Video title="Blade Runner" year="1982"/>')
+        (bundle / "Contents" / "_combined" / "poster.jpg").write_bytes(JPEG_HEADER)
+        root = scan_directory(tmp_path, check_magic_bytes=False)
+        bundle_node = next(c for c in root.children if c.name == "abc123.bundle")
+        assert bundle_node.display_name == "Blade Runner (1982)"
+
+    def test_poster_file_has_media_title(self, tmp_path):
+        bundle = _make_bundle(tmp_path, '<Video title="Alien" year="1979"/>')
+        (bundle / "Contents" / "_combined" / "poster.jpg").write_bytes(JPEG_HEADER)
+        root = scan_directory(tmp_path, check_magic_bytes=False)
+        all_p = root.all_posters()
+        assert all(p.media_title == "Alien (1979)" for p in all_p)
+
+    def test_poster_has_no_title_outside_bundle(self, tmp_path):
+        (tmp_path / "poster.jpg").write_bytes(JPEG_HEADER)
+        root = scan_directory(tmp_path, check_magic_bytes=False)
+        assert root.posters[0].media_title == ""
+
+    def test_display_name_falls_back_to_folder_name(self, tmp_path):
+        bundle = tmp_path / "xyz999.bundle"
+        posters = bundle / "Contents" / "_combined"
+        posters.mkdir(parents=True)
+        (posters / "poster.jpg").write_bytes(JPEG_HEADER)
+        root = scan_directory(tmp_path, check_magic_bytes=False)
+        bundle_node = next(c for c in root.children if c.name == "xyz999.bundle")
+        assert bundle_node.display_name == "xyz999.bundle"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

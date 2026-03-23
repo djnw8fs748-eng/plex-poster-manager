@@ -326,8 +326,9 @@ class PlexPosterApp(App):
         # Set up DataTable columns with explicit keys for update_cell().
         table = self.query_one("#poster-table", DataTable)
         table.add_column("", key="sel", width=3)
-        table.add_column("Filename", key="name", width=30)
-        table.add_column("Size", key="size", width=10)
+        table.add_column("Filename", key="name", width=28)
+        table.add_column("Media Item", key="media", width=26)
+        table.add_column("Size", key="size", width=9)
         table.add_column("Modified", key="date", width=17)
         table.add_column("Relative Path", key="relpath")
 
@@ -413,7 +414,7 @@ class PlexPosterApp(App):
         """Recursively add FolderNode children as tree nodes."""
         for child in folder.children:
             count = child.total_posters
-            label = f"{child.name} [dim]({count})[/dim]"
+            label = f"{child.display_name} [dim]({count})[/dim]"
             child_node = parent.add(label, data=child)
             if child.children:
                 self._add_tree_children(child_node, child)
@@ -437,7 +438,7 @@ class PlexPosterApp(App):
 
         count = len(posters)
         self.query_one("#panel-title", Label).update(
-            f"[bold]{folder.name}[/bold]  [dim]{count} poster(s)[/dim]"
+            f"[bold]{folder.display_name}[/bold]  [dim]{count} poster(s)[/dim]"
         )
 
         for poster in posters:
@@ -446,6 +447,7 @@ class PlexPosterApp(App):
             table.add_row(
                 indicator,
                 poster.name,
+                poster.media_title or "—",
                 poster.size_human,
                 poster.modified_str,
                 str(rel.parent) if rel != poster.path else str(poster.path.parent),

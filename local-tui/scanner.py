@@ -19,10 +19,11 @@ from __future__ import annotations
 
 import os
 import platform
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 
 # Extensions that are always treated as images without reading file content.
@@ -43,6 +44,7 @@ class PosterFile:
     path: Path
     size: int          # bytes
     modified: datetime
+    media_title: str = ""   # e.g. "The Dark Knight (2008)" from the parent bundle
 
     # ── Formatting helpers ──────────────────────────────────────────────────
 
@@ -72,6 +74,15 @@ class FolderNode:
     name: str
     posters: List[PosterFile] = field(default_factory=list)
     children: List["FolderNode"] = field(default_factory=list)
+    media_title: Optional[str] = None   # resolved from Info.xml inside the bundle
+    media_year: Optional[int] = None
+
+    @property
+    def display_name(self) -> str:
+        """Human-readable label: media title+year when known, else the folder name."""
+        if self.media_title:
+            return f"{self.media_title} ({self.media_year})" if self.media_year else self.media_title
+        return self.name
 
     # ── Aggregate helpers ───────────────────────────────────────────────────
 
@@ -161,8 +172,18 @@ def scan_directory(
     if not root.is_dir():
         raise NotADirectoryError(f"Not a directory: {root}")
 
-    def _scan(path: Path) -> FolderNode:
+    def _scan(path: Path, bundle_title: str = "") -> FolderNode:
         node = FolderNode(path=path, name=path.name or str(path))
+
+        # Detect the nearest .bundle ancestor and read its media title.
+        # Only the outermost bundle is used (bundle_title="" means not yet inside one).
+        current_title = bundle_title
+        if path.name.endswith(".bundle") and not bundle_title:
+            title, year = _read_bundle_info(path)
+            if title:
+                node.media_title = title
+                node.media_year = year
+                current_title = f"{title} ({year})" if year else title
 
         if progress_cb:
             progress_cb(str(path))
@@ -181,7 +202,7 @@ def scan_directory(
                 continue  # Skip symlinks to prevent cycles.
 
             if entry.is_dir():
-                child = _scan(entry)
+                child = _scan(entry, current_title)
                 if child.total_posters > 0:
                     node.children.append(child)
 
@@ -193,6 +214,7 @@ def scan_directory(
                             path=entry,
                             size=stat.st_size,
                             modified=datetime.fromtimestamp(stat.st_mtime),
+                            media_title=current_title,
                         )
                     )
                 except OSError:
@@ -216,6 +238,57 @@ def _is_image(path: Path, check_magic: bool) -> bool:
     if check_magic and not path.suffix:
         return _check_magic_bytes(path)
     return False
+
+
+def _read_bundle_info(bundle_path: Path) -> Tuple[Optional[str], Optional[int]]:
+    """
+    Try to extract a media title and year from a Plex .bundle directory.
+
+    Plex stores per-item metadata in XML files inside the bundle's Contents
+    sub-directory.  We check the combined cache first, then fall back to any
+    agent-specific Info.xml we can find.
+
+    Returns (title, year) or (None, None) if nothing readable is found.
+    """
+    contents = bundle_path / "Contents"
+    if not contents.is_dir():
+        return None, None
+
+    # Prefer the combined/cached copy; fall back to any agent directory.
+    candidates: List[Path] = [contents / "_combined" / "Info.xml"]
+    try:
+        for sub in sorted(contents.iterdir()):
+            if sub.is_dir() and sub.name != "_combined":
+                candidates.append(sub / "Info.xml")
+    except OSError:
+        pass
+
+    for xml_path in candidates:
+        if xml_path.is_file():
+            title, year = _parse_info_xml(xml_path)
+            if title:
+                return title, year
+
+    return None, None
+
+
+def _parse_info_xml(path: Path) -> Tuple[Optional[str], Optional[int]]:
+    """
+    Parse a Plex Info.xml file and return (title, year).
+
+    Plex's XML root element varies by agent (Video, Directory, Movie, …)
+    but always carries ``title`` and optionally ``year`` as attributes.
+    """
+    try:
+        root = ET.parse(path).getroot()  # noqa: S314  (local trusted file)
+        title = root.get("title") or root.get("name")
+        if not title:
+            return None, None
+        year_str = root.get("year", "")
+        year = int(year_str) if year_str.isdigit() else None
+        return title, year
+    except Exception:  # noqa: BLE001
+        return None, None
 
 
 def _check_magic_bytes(path: Path) -> bool:
