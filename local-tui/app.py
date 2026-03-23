@@ -35,11 +35,13 @@ from textual.widgets import (
 )
 from textual.widgets._tree import TreeNode
 
+from plex import PlexAuthError, PlexClient, PlexConnectionError, PlexError, find_local_token
 from scanner import FolderNode, PosterFile, get_default_plex_path, scan_directory
 
-# ── Selection indicator characters ──────────────────────────────────────────
+# ── Selection / status indicator characters ─────────────────────────────────
 _SEL = "☑"
 _UNS = "☐"
+_ACT = "[bold green]★[/bold green]"   # Plex active poster — protected
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -186,6 +188,131 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Modal — Plex connection
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class PlexConnectScreen(ModalScreen[Optional[tuple]]):
+    """
+    Optional Plex server connection.
+
+    Returns one of:
+      None                      — cancelled (no change)
+      ("disconnect",)           — user wants to disconnect
+      (PlexClient, str)         — (client, server_friendly_name)
+    """
+
+    DEFAULT_CSS = """
+    PlexConnectScreen {
+        align: center middle;
+    }
+    PlexConnectScreen > #dialog {
+        width: 76;
+        height: auto;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    PlexConnectScreen Label {
+        margin-bottom: 1;
+    }
+    PlexConnectScreen .field-label {
+        color: $text-muted;
+        margin-bottom: 0;
+    }
+    PlexConnectScreen Input {
+        margin-bottom: 1;
+    }
+    PlexConnectScreen #status {
+        height: 1;
+        margin-bottom: 1;
+    }
+    PlexConnectScreen #buttons {
+        align: right middle;
+        height: auto;
+        margin-top: 1;
+    }
+    PlexConnectScreen Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(self, current_client: Optional[PlexClient] = None) -> None:
+        super().__init__()
+        self._current_client = current_client
+
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog"):
+            yield Label("[bold]Plex Server Connection[/bold]")
+            yield Label(
+                "Connect to your local Plex server to identify the active poster "
+                "for each item so it is never accidentally deleted.",
+                id="hint",
+            )
+            yield Label("Server URL", classes="field-label")
+            yield Input(
+                value="http://localhost:32400",
+                placeholder="http://192.168.1.10:32400",
+                id="url-input",
+            )
+            yield Label("Auth Token", classes="field-label")
+            yield Input(
+                value=find_local_token(),
+                placeholder="your-plex-token",
+                password=True,
+                id="token-input",
+            )
+            yield Label("", id="status")
+            with Horizontal(id="buttons"):
+                yield Button("Cancel", id="cancel")
+                if self._current_client is not None:
+                    yield Button("Disconnect", variant="warning", id="disconnect")
+                yield Button("Test & Connect", variant="primary", id="connect")
+
+    @on(Button.Pressed, "#cancel")
+    def _cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#disconnect")
+    def _disconnect(self) -> None:
+        self.dismiss(("disconnect",))
+
+    @on(Button.Pressed, "#connect")
+    def _connect(self) -> None:
+        url = self.query_one("#url-input", Input).value.strip()
+        token = self.query_one("#token-input", Input).value.strip()
+        if not url:
+            self._set_status("[red]Enter a server URL.[/red]")
+            return
+        self._set_status("[dim]Connecting…[/dim]")
+        self.query_one("#connect", Button).disabled = True
+        self._do_test(url, token)
+
+    @work(thread=True)
+    def _do_test(self, url: str, token: str) -> None:
+        try:
+            client = PlexClient(base_url=url, token=token)
+            name = client.test_connection()
+            self.call_from_thread(self._on_success, client, name)
+        except PlexAuthError as exc:
+            self.call_from_thread(self._on_error, str(exc))
+        except PlexConnectionError as exc:
+            self.call_from_thread(self._on_error, str(exc))
+        except PlexError as exc:
+            self.call_from_thread(self._on_error, str(exc))
+
+    def _on_success(self, client: PlexClient, name: str) -> None:
+        self.dismiss((client, name))
+
+    def _on_error(self, message: str) -> None:
+        self._set_status(f"[red]{message}[/red]")
+        self.query_one("#connect", Button).disabled = False
+
+    def _set_status(self, markup: str) -> None:
+        self.query_one("#status", Label).update(markup)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Main application
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -273,6 +400,7 @@ class PlexPosterApp(App):
     BINDINGS = [
         Binding("ctrl+o", "configure", "Path", show=True),
         Binding("ctrl+r", "rescan", "Rescan", show=True),
+        Binding("ctrl+p", "plex_connect", "Plex", show=True),
         Binding("space", "toggle_selection", "Toggle", show=True),
         Binding("ctrl+a", "select_all", "All", show=True),
         Binding("escape", "select_none", "None", show=True),
@@ -294,6 +422,11 @@ class PlexPosterApp(App):
         self._highlighted_key: Optional[str] = None
         # Ordered list of PosterFile objects currently visible in the table.
         self._visible_posters: list[PosterFile] = []
+        # Plex API client (optional — set via Ctrl+P).
+        self._plex_client: Optional[PlexClient] = None
+        self._plex_server_name: str = ""
+        # Paths of files currently selected as active in Plex (protected).
+        self._plex_protected: Set[Path] = set()
 
     # ── UI construction ─────────────────────────────────────────────────────
 
@@ -326,8 +459,9 @@ class PlexPosterApp(App):
         # Set up DataTable columns with explicit keys for update_cell().
         table = self.query_one("#poster-table", DataTable)
         table.add_column("", key="sel", width=3)
-        table.add_column("Filename", key="name", width=30)
-        table.add_column("Size", key="size", width=10)
+        table.add_column("Filename", key="name", width=28)
+        table.add_column("Media Item", key="media", width=26)
+        table.add_column("Size", key="size", width=9)
         table.add_column("Modified", key="date", width=17)
         table.add_column("Relative Path", key="relpath")
 
@@ -349,10 +483,9 @@ class PlexPosterApp(App):
     def _start_scan(self, path: Path) -> None:
         self._scan_path = path
         self._selected.clear()
+        self._plex_protected.clear()
         self._visible_posters = []
-        self.query_one("#info-bar", Static).update(
-            f"[bold]Scanning:[/bold] {path}"
-        )
+        self.query_one("#info-bar", Static).update(f"[bold]Scanning:[/bold] {path}")
         self.query_one("#loading", LoadingIndicator).display = True
         self.query_one("#folder-tree", Tree).display = False
         # Clear the poster table while we rescan.
@@ -386,16 +519,115 @@ class PlexPosterApp(App):
     def _apply_result(self, path: Path, root: FolderNode) -> None:
         self._root_node = root
         total = root.total_posters
-        self.query_one("#info-bar", Static).update(
-            f"[bold]Path:[/bold] {path}  [dim]({total} poster(s) found)[/dim]"
-        )
+        self._update_info_bar()
         self._build_tree(root)
         self._end_scan()
         self.notify(f"Scan complete — {total} poster(s) found.", timeout=4)
+        if self._plex_client:
+            self._fetch_plex_selections()
 
     def _end_scan(self) -> None:
         self.query_one("#loading", LoadingIndicator).display = False
         self.query_one("#folder-tree", Tree).display = True
+
+    def _update_info_bar(self) -> None:
+        """Rewrite the top info bar with current scan path and Plex status."""
+        if not self._scan_path or not self._root_node:
+            return
+        total = self._root_node.total_posters
+        plex_part = (
+            f"  [dim]·[/dim]  [bold]Plex:[/bold] {self._plex_server_name} "
+            f"[dim](★ {len(self._plex_protected)} protected)[/dim]"
+            if self._plex_client
+            else ""
+        )
+        self.query_one("#info-bar", Static).update(
+            f"[bold]Path:[/bold] {self._scan_path}  "
+            f"[dim]({total} poster(s) found)[/dim]{plex_part}"
+        )
+
+    # ── Plex integration ─────────────────────────────────────────────────────
+
+    def _iter_bundle_nodes(self, node: FolderNode):
+        """Yield every FolderNode that has a Plex ratingKey (i.e. is a bundle)."""
+        if node.rating_key:
+            yield node
+        for child in node.children:
+            yield from self._iter_bundle_nodes(child)
+
+    @work(exclusive=False, thread=True)
+    def _fetch_plex_selections(self) -> None:
+        """
+        Background worker: for every scanned bundle with a ratingKey, ask Plex
+        which poster is currently selected and mark the matching disk file.
+        """
+        if not self._plex_client or not self._root_node:
+            return
+
+        self.call_from_thread(
+            self.notify, "Fetching active posters from Plex…", timeout=3
+        )
+
+        protected: Set[Path] = set()
+
+        for bundle_node in self._iter_bundle_nodes(self._root_node):
+            try:
+                api_posters = self._plex_client.get_posters(bundle_node.rating_key)
+            except Exception:  # noqa: BLE001
+                continue
+
+            for api_poster in api_posters:
+                if not api_poster.selected:
+                    continue
+                short = api_poster.short_key
+                # Match by filename — Plex stores extensionless cache files
+                # whose name equals the poster hash in the upload:// URL.
+                for pf in bundle_node.all_posters():
+                    if pf.path.name == short:
+                        pf.is_plex_selected = True
+                        protected.add(pf.path)
+
+        self.call_from_thread(self._after_plex_fetch, protected)
+
+    def _after_plex_fetch(self, protected: Set[Path]) -> None:
+        self._plex_protected = protected
+        # Drop any user-selected paths that are now known to be active in Plex.
+        self._selected -= protected
+        self._update_info_bar()
+        self.notify(
+            f"Plex: {len(protected)} active poster(s) marked as protected.",
+            timeout=5,
+        )
+        if self._current_folder:
+            self._populate_table(self._current_folder)
+
+    def action_plex_connect(self) -> None:
+        self.push_screen(
+            PlexConnectScreen(current_client=self._plex_client),
+            self._on_plex_result,
+        )
+
+    def _on_plex_result(self, result: Optional[tuple]) -> None:
+        if result is None:
+            return
+        if result == ("disconnect",):
+            self._plex_client = None
+            self._plex_server_name = ""
+            self._plex_protected.clear()
+            # Clear is_plex_selected on all poster files in the tree.
+            if self._root_node:
+                for pf in self._root_node.all_posters():
+                    pf.is_plex_selected = False
+            self._update_info_bar()
+            if self._current_folder:
+                self._populate_table(self._current_folder)
+            self.notify("Plex disconnected.", timeout=3)
+            return
+        client, name = result
+        self._plex_client = client
+        self._plex_server_name = name
+        self.notify(f"Connected to Plex: {name}", timeout=4)
+        self._fetch_plex_selections()
 
     # ── Tree building ────────────────────────────────────────────────────────
 
@@ -413,7 +645,7 @@ class PlexPosterApp(App):
         """Recursively add FolderNode children as tree nodes."""
         for child in folder.children:
             count = child.total_posters
-            label = f"{child.name} [dim]({count})[/dim]"
+            label = f"{child.display_name} [dim]({count})[/dim]"
             child_node = parent.add(label, data=child)
             if child.children:
                 self._add_tree_children(child_node, child)
@@ -437,15 +669,21 @@ class PlexPosterApp(App):
 
         count = len(posters)
         self.query_one("#panel-title", Label).update(
-            f"[bold]{folder.name}[/bold]  [dim]{count} poster(s)[/dim]"
+            f"[bold]{folder.display_name}[/bold]  [dim]{count} poster(s)[/dim]"
         )
 
         for poster in posters:
-            indicator = _SEL if poster.path in self._selected else _UNS
+            if poster.is_plex_selected:
+                indicator = _ACT
+            elif poster.path in self._selected:
+                indicator = _SEL
+            else:
+                indicator = _UNS
             rel = self._rel(poster.path)
             table.add_row(
                 indicator,
                 poster.name,
+                poster.media_title or "—",
                 poster.size_human,
                 poster.modified_str,
                 str(rel.parent) if rel != poster.path else str(poster.path.parent),
@@ -484,6 +722,13 @@ class PlexPosterApp(App):
 
     def _toggle(self, path_str: str) -> None:
         path = Path(path_str)
+        if path in self._plex_protected:
+            self.notify(
+                "This is Plex's active poster — it cannot be selected for deletion.",
+                severity="warning",
+                timeout=4,
+            )
+            return
         table = self.query_one("#poster-table", DataTable)
         if path in self._selected:
             self._selected.discard(path)
@@ -498,9 +743,10 @@ class PlexPosterApp(App):
         self._update_status()
 
     def action_select_all(self) -> None:
-        """Mark every poster in the current view as selected."""
+        """Mark every non-protected poster in the current view as selected."""
         for poster in self._visible_posters:
-            self._selected.add(poster.path)
+            if poster.path not in self._plex_protected:
+                self._selected.add(poster.path)
         self._refresh_indicators()
         self._update_status()
 
@@ -547,31 +793,37 @@ class PlexPosterApp(App):
 
     @work(thread=True)
     def _do_delete(self) -> None:
-        """Delete selected files on a background thread."""
+        """Delete selected files on a background thread, skipping protected ones."""
         paths = list(self._selected)
         deleted = 0
+        skipped = 0
         failed: list[str] = []
 
         for path in paths:
+            if path in self._plex_protected:
+                skipped += 1
+                continue
             try:
                 path.unlink()
                 deleted += 1
             except OSError as exc:
                 failed.append(f"{path.name}: {exc}")
 
-        self.call_from_thread(self._after_delete, deleted, failed)
+        self.call_from_thread(self._after_delete, deleted, skipped, failed)
 
-    def _after_delete(self, deleted: int, failed: list[str]) -> None:
+    def _after_delete(self, deleted: int, skipped: int, failed: list[str]) -> None:
         self._selected.clear()
 
         noun = "poster" if deleted == 1 else "posters"
         msg = f"Deleted {deleted} {noun}."
+        if skipped:
+            msg += f"  {skipped} active Plex poster(s) skipped."
         if failed:
             msg += f"  {len(failed)} error(s)."
             for err in failed[:3]:
                 self.notify(err, severity="error", timeout=6)
 
-        severity = "warning" if failed else "information"
+        severity = "warning" if (failed or skipped) else "information"
         self.notify(msg, severity=severity, timeout=5)
 
         # Rescan so the tree and table reflect the deletions.
