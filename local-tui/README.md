@@ -61,36 +61,48 @@ git clone https://github.com/djnw8fs748-eng/plex-poster-manager.git
 cd plex-poster-manager/local-tui
 ```
 
-### 2 — Install (all dependencies included)
+### 2 — Create a virtual environment and install
 
-```
+**macOS / Linux** (required on modern macOS — system Python blocks direct installs):
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install .
 ```
 
-This installs `textual`, `requests`, and everything else the app needs, and
-adds a `plex-poster` command to your PATH.
+**Windows:**
 
-> **Tip (Windows):** Open **Windows Terminal** or PowerShell, `cd` into the
-> `local-tui` folder, then run the pip command above.  Python 3.10+ must be in
-> your `PATH`.  You can verify with `python --version`.
+```
+python -m venv .venv
+.venv\Scripts\activate
+pip install .
+```
 
-> **Tip:** Use a virtual environment to keep dependencies isolated:
-> ```
-> python -m venv .venv
-> source .venv/bin/activate   # Windows: .venv\Scripts\activate
-> pip install .
-> ```
+This installs `textual`, `requests`, and everything else the app needs.
+
+> **Why a virtual environment?**  macOS (since Homebrew Python 3.12+) follows
+> [PEP 668](https://peps.python.org/pep-0668/) and refuses `pip install`
+> without a virtual environment.  Without one, `requests` is not installed,
+> the Plex integration silently fails, and the **Plex** option disappears from
+> the footer.  Always use the virtual environment.
 
 ### 3 — Run
+
+With the virtual environment **activated** (see step 2):
 
 ```
 plex-poster
 ```
 
-Or without installing:
+Or run directly without activating:
 
-```
-python app.py
+```bash
+# macOS / Linux
+.venv/bin/plex-poster
+
+# Windows
+.venv\Scripts\plex-poster
 ```
 
 The app will **auto-detect** your Plex metadata folder on startup.  If it
@@ -99,9 +111,11 @@ can enter the correct location.
 
 ---
 
-## Updating the app (Windows)
+## Updating the app
 
-When a new version is released, pull the latest code and reinstall:
+When a new version is released, pull the latest code and reinstall.
+
+**Windows:**
 
 1. Open **Windows Terminal** or **PowerShell** and navigate to the repo folder:
 
@@ -115,13 +129,7 @@ When a new version is released, pull the latest code and reinstall:
    git pull
    ```
 
-3. Reinstall to pick up any new or updated dependencies:
-
-   ```
-   pip install .
-   ```
-
-   If you used a virtual environment during installation, activate it first:
+3. Activate the virtual environment and reinstall:
 
    ```
    .venv\Scripts\activate
@@ -133,6 +141,16 @@ When a new version is released, pull the latest code and reinstall:
    ```
    plex-poster
    ```
+
+**macOS / Linux:**
+
+```bash
+cd path/to/plex-poster-manager/local-tui
+git pull
+source .venv/bin/activate
+pip install .
+plex-poster
+```
 
 > **Note:** You do not need to uninstall the old version first — `pip install .`
 > upgrades in place.
@@ -278,8 +296,9 @@ Press `Ctrl+O` at any time to open the path dialog.  You can point the app at:
 | `Permission denied` errors | On Windows, close Plex Media Server before deleting files from its cache |
 | Plex connection fails | Verify the URL includes the port (`:32400`) and the token is correct |
 | `★` protection not showing | Plex connection required — press `Ctrl+P` to connect |
-| `textual` not found | Run `pip install .` from the `local-tui` folder |
-| `requests` not found | Run `pip install .` from the `local-tui` folder |
+| **Plex option missing from footer** | `requests` not installed — create and use a virtual environment (see Installation step 2) |
+| `textual` not found | Activate the virtual environment and run `pip install .` |
+| `requests` not found | Activate the virtual environment and run `pip install .` |
 | App display looks broken | Use a terminal that supports Unicode and at least 80 columns (Windows Terminal, iTerm2, etc.) |
 
 ---
