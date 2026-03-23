@@ -329,6 +329,7 @@ class PlexPosterApp(App):
     """
 
     TITLE = "Plex Local Poster Manager"
+    ENABLE_COMMAND_PALETTE = False  # Ctrl+P is used for Plex connection
 
     CSS = """
     /* ── Top info bar ─────────────────────────────────────────────────────── */
