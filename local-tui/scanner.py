@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import os
 import platform
+import sqlite3
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 
 # Extensions that are always treated as images without reading file content.
@@ -174,6 +175,14 @@ def scan_directory(
     if not root.is_dir():
         raise NotADirectoryError(f"Not a directory: {root}")
 
+    # Load bundle hash→(title, year, rating_key) from the Plex SQLite database.
+    # Modern Plex (2021+) does not write Info.xml into bundles, so this is the
+    # primary source of media titles for most users.
+    db_titles: Dict[str, Tuple[str, Optional[int], Optional[str]]] = {}
+    db_path = _find_plex_db(root)
+    if db_path:
+        db_titles = _load_db_titles(db_path)
+
     def _scan(path: Path, bundle_title: str = "") -> FolderNode:
         node = FolderNode(path=path, name=path.name or str(path))
 
@@ -182,6 +191,12 @@ def scan_directory(
         current_title = bundle_title
         if path.name.endswith(".bundle") and not bundle_title:
             title, year, rating_key = _read_bundle_info(path)
+            # Modern Plex does not write Info.xml; fall back to the SQLite DB.
+            if not title and db_titles:
+                bundle_hash = path.parent.name + path.stem
+                db_entry = db_titles.get(bundle_hash)
+                if db_entry:
+                    title, year, rating_key = db_entry
             if title:
                 node.media_title = title
                 node.media_year = year
@@ -241,6 +256,64 @@ def _is_image(path: Path, check_magic: bool) -> bool:
     if check_magic and not path.suffix:
         return _check_magic_bytes(path)
     return False
+
+
+def _find_plex_db(scan_root: Path) -> Optional[Path]:
+    """
+    Locate Plex's SQLite metadata database relative to the scan root.
+
+    The database lives in ``Plex Media Server/Plug-in Support/Databases/``
+    which is a sibling of the ``Metadata/`` folder we scan.  We walk up a
+    few parent directories to find it regardless of how deep the scan root is.
+    """
+    search = scan_root
+    for _ in range(5):
+        candidate = (
+            search / "Plug-in Support" / "Databases" / "com.plexapp.plugins.library.db"
+        )
+        if candidate.is_file():
+            return candidate
+        search = search.parent
+    return None
+
+
+def _load_db_titles(
+    db_path: Path,
+) -> Dict[str, Tuple[str, Optional[int], Optional[str]]]:
+    """
+    Read bundle-hash → (title, year, rating_key) from Plex's SQLite database.
+
+    The ``metadata_items`` table stores the same hash that Plex uses to name
+    ``.bundle`` directories: the first two characters become the parent folder
+    and the remainder is the bundle stem, so the full hash is
+    ``parent_dir_name + bundle_stem``.
+
+    Opens the database read-only so it is safe to call while Plex is running.
+    Returns an empty dict on any error (locked DB, missing table, etc.).
+    """
+    result: Dict[str, Tuple[str, Optional[int], Optional[str]]] = {}
+    try:
+        uri = f"file:{db_path}?mode=ro"
+        con = sqlite3.connect(uri, uri=True, timeout=3, check_same_thread=False)
+        try:
+            cur = con.cursor()
+            cur.execute(
+                "SELECT hash, title, year, id FROM metadata_items "
+                "WHERE hash IS NOT NULL AND title IS NOT NULL AND title != ''"
+            )
+            for row in cur.fetchall():
+                bundle_hash, title, year, item_id = row
+                if bundle_hash:
+                    result[bundle_hash] = (
+                        title,
+                        int(year) if year else None,
+                        str(item_id) if item_id else None,
+                    )
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001 — any DB error is non-fatal
+        pass
+    return result
 
 
 def _read_bundle_info(

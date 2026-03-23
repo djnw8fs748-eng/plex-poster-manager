@@ -18,7 +18,9 @@ from scanner import (
     FolderNode,
     PosterFile,
     _check_magic_bytes,
+    _find_plex_db,
     _is_image,
+    _load_db_titles,
     _parse_info_xml,
     _read_bundle_info,
     get_default_plex_path,
@@ -487,6 +489,133 @@ class TestBundleTitleInScan:
         root = scan_directory(tmp_path, check_magic_bytes=False)
         bundle_node = next(c for c in root.children if c.name == "xyz999.bundle")
         assert bundle_node.display_name == "xyz999.bundle"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SQLite DB helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _make_plex_db(path: Path) -> Path:
+    """Create a minimal Plex-style SQLite database with a metadata_items table."""
+    import sqlite3
+    db = path / "com.plexapp.plugins.library.db"
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "CREATE TABLE metadata_items "
+        "(id INTEGER, hash TEXT, title TEXT, year INTEGER)"
+    )
+    con.execute(
+        "INSERT INTO metadata_items VALUES (42, 'abcdef1234567890', 'Alien', 1979)"
+    )
+    con.execute(
+        "INSERT INTO metadata_items VALUES (7, 'ff00112233445566', 'The Bear', 2022)"
+    )
+    con.execute(
+        "INSERT INTO metadata_items VALUES (99, NULL, 'No Hash', 2000)"
+    )
+    con.commit()
+    con.close()
+    return db
+
+
+class TestFindPlexDb:
+    def test_finds_db_in_sibling_directory(self, tmp_path):
+        plex_root = tmp_path / "Plex Media Server"
+        metadata = plex_root / "Metadata"
+        metadata.mkdir(parents=True)
+        db_dir = plex_root / "Plug-in Support" / "Databases"
+        db_dir.mkdir(parents=True)
+        db = db_dir / "com.plexapp.plugins.library.db"
+        db.write_bytes(b"")
+        assert _find_plex_db(metadata) == db
+
+    def test_finds_db_when_scanning_subdirectory(self, tmp_path):
+        plex_root = tmp_path / "Plex Media Server"
+        metadata = plex_root / "Metadata" / "Movies"
+        metadata.mkdir(parents=True)
+        db_dir = plex_root / "Plug-in Support" / "Databases"
+        db_dir.mkdir(parents=True)
+        db = db_dir / "com.plexapp.plugins.library.db"
+        db.write_bytes(b"")
+        assert _find_plex_db(metadata) == db
+
+    def test_returns_none_when_not_found(self, tmp_path):
+        assert _find_plex_db(tmp_path) is None
+
+
+class TestLoadDbTitles:
+    def test_loads_titles_from_db(self, tmp_path):
+        _make_plex_db(tmp_path)
+        db = tmp_path / "com.plexapp.plugins.library.db"
+        titles = _load_db_titles(db)
+        assert "abcdef1234567890" in titles
+        assert titles["abcdef1234567890"][0] == "Alien"
+        assert titles["abcdef1234567890"][1] == 1979
+        assert titles["abcdef1234567890"][2] == "42"
+
+    def test_skips_rows_with_null_hash(self, tmp_path):
+        _make_plex_db(tmp_path)
+        db = tmp_path / "com.plexapp.plugins.library.db"
+        titles = _load_db_titles(db)
+        assert all(v[0] != "No Hash" for v in titles.values())
+
+    def test_returns_empty_dict_for_missing_file(self, tmp_path):
+        assert _load_db_titles(tmp_path / "nonexistent.db") == {}
+
+    def test_returns_empty_dict_for_corrupt_file(self, tmp_path):
+        bad = tmp_path / "com.plexapp.plugins.library.db"
+        bad.write_bytes(b"not a sqlite database")
+        assert _load_db_titles(bad) == {}
+
+
+class TestDbTitleFallbackInScan:
+    def test_uses_db_title_when_no_info_xml(self, tmp_path):
+        # Create a bundle without Info.xml (modern Plex style)
+        bundle = tmp_path / "Plex Media Server" / "Metadata" / "Movies" / "ab" / "cdef1234567890.bundle"
+        posters = bundle / "Contents" / "_stored"
+        posters.mkdir(parents=True)
+        (posters / "poster.jpg").write_bytes(JPEG_HEADER)
+
+        # Create matching DB entry (hash = "ab" + "cdef1234567890")
+        db_dir = tmp_path / "Plex Media Server" / "Plug-in Support" / "Databases"
+        db_dir.mkdir(parents=True)
+        import sqlite3
+        db = db_dir / "com.plexapp.plugins.library.db"
+        con = sqlite3.connect(str(db))
+        con.execute("CREATE TABLE metadata_items (id INTEGER, hash TEXT, title TEXT, year INTEGER)")
+        con.execute("INSERT INTO metadata_items VALUES (5, 'abcdef1234567890', 'Inception', 2010)")
+        con.commit()
+        con.close()
+
+        metadata = tmp_path / "Plex Media Server" / "Metadata"
+        root = scan_directory(metadata, check_magic_bytes=False)
+        all_p = root.all_posters()
+        assert len(all_p) == 1
+        assert all_p[0].media_title == "Inception (2010)"
+
+    def test_info_xml_takes_priority_over_db(self, tmp_path):
+        # Bundle with both Info.xml and a DB entry — XML wins
+        bundle = tmp_path / "Plex Media Server" / "Metadata" / "Movies" / "ab" / "cdef1234567890.bundle"
+        combined = bundle / "Contents" / "_combined"
+        combined.mkdir(parents=True)
+        (combined / "Info.xml").write_text('<Video title="XML Title" year="2001"/>', encoding="utf-8")
+        (combined / "poster.jpg").write_bytes(JPEG_HEADER)
+
+        db_dir = tmp_path / "Plex Media Server" / "Plug-in Support" / "Databases"
+        db_dir.mkdir(parents=True)
+        import sqlite3
+        db = db_dir / "com.plexapp.plugins.library.db"
+        con = sqlite3.connect(str(db))
+        con.execute("CREATE TABLE metadata_items (id INTEGER, hash TEXT, title TEXT, year INTEGER)")
+        con.execute("INSERT INTO metadata_items VALUES (5, 'abcdef1234567890', 'DB Title', 2010)")
+        con.commit()
+        con.close()
+
+        metadata = tmp_path / "Plex Media Server" / "Metadata"
+        root = scan_directory(metadata, check_magic_bytes=False)
+        bundle_node = next(c for c in root.all_posters())
+        assert bundle_node.media_title == "XML Title (2001)"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
