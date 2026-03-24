@@ -495,6 +495,7 @@ class PlexPosterApp(App):
         Binding("ctrl+p", "plex_connect", "Plex", show=True),
         Binding("space", "toggle_selection", "Toggle", show=True),
         Binding("ctrl+a", "select_all", "All", show=True),
+        Binding("ctrl+u", "select_all_unused", "All Unused", show=True),
         Binding("escape", "select_none", "None", show=True),
         Binding("delete", "delete_selected", "Delete", show=True),
         Binding("ctrl+q,q", "quit", "Quit", show=True),
@@ -543,6 +544,7 @@ class PlexPosterApp(App):
                 with Horizontal(id="action-bar"):
                     yield Button("Select All", id="btn-all", variant="default")
                     yield Button("Select None", id="btn-none", variant="default")
+                    yield Button("Select All Unused", id="btn-all-unused", variant="warning")
                     yield Label("0 posters selected", id="selection-status")
                     yield Button("Delete Selected", id="btn-delete", variant="error")
         yield Footer()
@@ -858,6 +860,29 @@ class PlexPosterApp(App):
         self._refresh_indicators()
         self._update_status()
 
+    def action_select_all_unused(self) -> None:
+        """Mark every non-protected poster across the entire tree as selected.
+
+        Unlike Select All (which only covers the current folder view), this
+        walks all scanned posters so the user can queue up a full library
+        clean-up in one keystroke — then review or delete in one pass.
+        """
+        if not self._root_node:
+            self.notify("No scan loaded — press Ctrl+O to scan a path.", severity="warning", timeout=4)
+            return
+        all_posters = self._root_node.all_posters()
+        added = 0
+        for poster in all_posters:
+            if poster.path not in self._plex_protected:
+                self._selected.add(poster.path)
+                added += 1
+        self._refresh_indicators()
+        self._update_status()
+        self.notify(
+            f"{added} unused poster(s) selected across all folders.",
+            timeout=4,
+        )
+
     def action_select_none(self) -> None:
         """Clear all selections in the current view."""
         for poster in self._visible_posters:
@@ -968,6 +993,10 @@ class PlexPosterApp(App):
     @on(Button.Pressed, "#btn-none")
     def _btn_none(self) -> None:
         self.action_select_none()
+
+    @on(Button.Pressed, "#btn-all-unused")
+    def _btn_all_unused(self) -> None:
+        self.action_select_all_unused()
 
     @on(Button.Pressed, "#btn-delete")
     def _btn_delete(self) -> None:
