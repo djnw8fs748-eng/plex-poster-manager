@@ -14,6 +14,8 @@ or, if installed as an entry-point:
 
 from __future__ import annotations
 
+import platform
+import subprocess
 from pathlib import Path
 from typing import Optional, Set
 
@@ -187,6 +189,52 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
         self.dismiss(True)
 
 
+# ── OS clipboard helper ──────────────────────────────────────────────────────
+
+
+def _read_os_clipboard() -> str:
+    """
+    Read text from the OS clipboard using platform-native commands.
+
+    Textual's built-in ``action_paste`` reads from an internal clipboard that
+    is only populated when the user copies *within* Textual.  Tokens copied
+    from a browser or another application end up in the OS clipboard, which
+    this helper reaches via a subprocess call.  Returns an empty string on
+    any failure so the caller can silently fall back.
+    """
+    try:
+        system = platform.system()
+        if system == "Windows":
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            return result.stdout.strip()
+        if system == "Darwin":
+            result = subprocess.run(
+                ["pbpaste"], capture_output=True, text=True, timeout=3
+            )
+            return result.stdout.strip()
+        # Linux — try xclip then xsel
+        for cmd in (
+            ["xclip", "-selection", "clipboard", "-o"],
+            ["xsel", "--clipboard", "--output"],
+        ):
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=3
+                )
+                if result.returncode == 0:
+                    return result.stdout.strip()
+            except FileNotFoundError:
+                continue
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Modal — Plex connection
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -292,6 +340,24 @@ class PlexConnectScreen(ModalScreen[Optional[tuple]]):
     @on(Button.Pressed, "#disconnect")
     def _disconnect(self) -> None:
         self.dismiss(("disconnect",))
+
+    def action_paste(self) -> None:
+        """Paste from the OS clipboard into whichever input is focused.
+
+        Textual's default action_paste reads from an internal clipboard that
+        is empty when text was copied outside the app (e.g. a token from a
+        browser).  This override reads from the real OS clipboard so the user
+        can paste a Plex token with Ctrl+V just as they would anywhere else.
+        """
+        focused = self.focused
+        if not isinstance(focused, Input):
+            return
+        text = _read_os_clipboard()
+        if not text:
+            # Fall back to Textual's internal clipboard if OS read fails.
+            text = self.app.clipboard
+        if text:
+            focused.insert_text_at_cursor(text)
 
     @on(Button.Pressed, "#toggle-token")
     def _toggle_token(self) -> None:
