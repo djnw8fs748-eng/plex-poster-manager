@@ -581,7 +581,7 @@ class PlexPosterApp(App):
         for child in node.children:
             yield from self._iter_bundle_nodes(child)
 
-    @work(exclusive=False, thread=True)
+    @work(exclusive=True, thread=True)
     def _fetch_plex_selections(self) -> None:
         """
         Background worker: for every scanned bundle with a ratingKey, ask Plex
@@ -786,7 +786,12 @@ class PlexPosterApp(App):
     def _refresh_indicators(self) -> None:
         table = self.query_one("#poster-table", DataTable)
         for poster in self._visible_posters:
-            indicator = _SEL if poster.path in self._selected else _UNS
+            if poster.is_plex_selected:
+                indicator = _ACT
+            elif poster.path in self._selected:
+                indicator = _SEL
+            else:
+                indicator = _UNS
             try:
                 table.update_cell(
                     str(poster.path), "sel", indicator, update_width=False
@@ -815,12 +820,13 @@ class PlexPosterApp(App):
 
     def _on_confirm(self, confirmed: bool) -> None:
         if confirmed:
-            self._do_delete()
+            # Snapshot on the main thread to avoid a race with concurrent
+            # mutations of _selected (e.g. _after_plex_fetch).
+            self._do_delete(list(self._selected))
 
     @work(thread=True)
-    def _do_delete(self) -> None:
+    def _do_delete(self, paths: list) -> None:
         """Delete selected files on a background thread, skipping protected ones."""
-        paths = list(self._selected)
         deleted = 0
         skipped = 0
         failed: list[str] = []

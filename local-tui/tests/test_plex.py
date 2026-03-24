@@ -387,7 +387,7 @@ class TestPlexClientGetPosters:
         mock_session.get.return_value = _mock_response(
             {
                 "MediaContainer": {
-                    "Metadata": [
+                    "Photo": [
                         {
                             "key": "https://image.tmdb.org/abc.jpg",
                             "selected": True,

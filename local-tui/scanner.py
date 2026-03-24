@@ -183,8 +183,13 @@ def scan_directory(
     if db_path:
         db_titles = _load_db_titles(db_path)
 
-    def _scan(path: Path, bundle_title: str = "") -> FolderNode:
+    _MAX_DEPTH = 40  # Guard against adversarial or accidentally deep trees.
+
+    def _scan(path: Path, bundle_title: str = "", depth: int = 0) -> FolderNode:
         node = FolderNode(path=path, name=path.name or str(path))
+
+        if depth >= _MAX_DEPTH:
+            return node
 
         # Detect the nearest .bundle ancestor and read its media title.
         # Only the outermost bundle is used (bundle_title="" means not yet inside one).
@@ -220,7 +225,7 @@ def scan_directory(
                 continue  # Skip symlinks to prevent cycles.
 
             if entry.is_dir():
-                child = _scan(entry, current_title)
+                child = _scan(entry, current_title, depth + 1)
                 if child.total_posters > 0:
                     node.children.append(child)
 
