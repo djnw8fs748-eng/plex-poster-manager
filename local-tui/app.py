@@ -223,6 +223,19 @@ class PlexConnectScreen(ModalScreen[Optional[tuple]]):
     PlexConnectScreen Input {
         margin-bottom: 1;
     }
+    PlexConnectScreen #token-row {
+        height: auto;
+        margin-bottom: 1;
+    }
+    PlexConnectScreen #token-row Input {
+        width: 1fr;
+        margin-bottom: 0;
+    }
+    PlexConnectScreen #token-row Button {
+        width: auto;
+        margin-left: 1;
+        margin-bottom: 0;
+    }
     PlexConnectScreen #status {
         height: 1;
         margin-bottom: 1;
@@ -240,6 +253,7 @@ class PlexConnectScreen(ModalScreen[Optional[tuple]]):
     def __init__(self, current_client: Optional[PlexClient] = None) -> None:
         super().__init__()
         self._current_client = current_client
+        self._token_visible = False
 
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
@@ -256,12 +270,14 @@ class PlexConnectScreen(ModalScreen[Optional[tuple]]):
                 id="url-input",
             )
             yield Label("Auth Token", classes="field-label")
-            yield Input(
-                value=find_local_token(),
-                placeholder="your-plex-token",
-                password=True,
-                id="token-input",
-            )
+            with Horizontal(id="token-row"):
+                yield Input(
+                    value=find_local_token(),
+                    placeholder="Paste your X-Plex-Token here",
+                    password=True,
+                    id="token-input",
+                )
+                yield Button("Show", id="toggle-token")
             yield Label("", id="status")
             with Horizontal(id="buttons"):
                 yield Button("Cancel", id="cancel")
@@ -276,6 +292,15 @@ class PlexConnectScreen(ModalScreen[Optional[tuple]]):
     @on(Button.Pressed, "#disconnect")
     def _disconnect(self) -> None:
         self.dismiss(("disconnect",))
+
+    @on(Button.Pressed, "#toggle-token")
+    def _toggle_token(self) -> None:
+        self._token_visible = not self._token_visible
+        inp = self.query_one("#token-input", Input)
+        inp.password = not self._token_visible
+        self.query_one("#toggle-token", Button).label = (
+            "Hide" if self._token_visible else "Show"
+        )
 
     @on(Button.Pressed, "#connect")
     def _connect(self) -> None:
