@@ -46,6 +46,16 @@ _UNS = "☐"
 _ACT = "[bold green]★[/bold green]"   # Plex active poster — protected
 
 
+def _format_size(num_bytes: int) -> str:
+    """Return a human-readable byte size string (e.g. '1.4 GB')."""
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Modal — Config / path picker
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -520,6 +530,8 @@ class PlexPosterApp(App):
         self._plex_server_name: str = ""
         # Paths of files currently selected as active in Plex (protected).
         self._plex_protected: Set[Path] = set()
+        # path → byte size cache, rebuilt after each scan for O(1) size lookups.
+        self._size_cache: dict[Path, int] = {}
 
     # ── UI construction ─────────────────────────────────────────────────────
 
@@ -612,6 +624,7 @@ class PlexPosterApp(App):
 
     def _apply_result(self, path: Path, root: FolderNode) -> None:
         self._root_node = root
+        self._size_cache = {pf.path: pf.size for pf in root.all_posters()}
         total = root.total_posters
         self._update_info_bar()
         self._build_tree(root)
@@ -909,8 +922,10 @@ class PlexPosterApp(App):
     def _update_status(self) -> None:
         count = len(self._selected)
         noun = "poster" if count == 1 else "posters"
+        total_bytes = sum(self._size_cache.get(p, 0) for p in self._selected)
+        size_str = f"  [dim]({_format_size(total_bytes)} to free)[/dim]" if count else ""
         self.query_one("#selection-status", Label).update(
-            f"[bold]{count}[/bold] {noun} selected"
+            f"[bold]{count}[/bold] {noun} selected{size_str}"
         )
         self._update_delete_button()
 
