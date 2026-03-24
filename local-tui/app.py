@@ -318,13 +318,13 @@ class PlexConnectScreen(ModalScreen[Optional[tuple]]):
         try:
             client = PlexClient(base_url=url, token=token)
             name = client.test_connection()
-            self.call_from_thread(self._on_success, client, name)
+            self.app.call_from_thread(self._on_success, client, name)
         except PlexAuthError as exc:
-            self.call_from_thread(self._on_error, str(exc))
+            self.app.call_from_thread(self._on_error, str(exc))
         except PlexConnectionError as exc:
-            self.call_from_thread(self._on_error, str(exc))
+            self.app.call_from_thread(self._on_error, str(exc))
         except PlexError as exc:
-            self.call_from_thread(self._on_error, str(exc))
+            self.app.call_from_thread(self._on_error, str(exc))
 
     def _on_success(self, client: PlexClient, name: str) -> None:
         self.dismiss((client, name))
