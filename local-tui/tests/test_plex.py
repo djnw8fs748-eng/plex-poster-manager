@@ -411,6 +411,26 @@ class TestPlexClientGetPosters:
         # rating_key is propagated to each poster
         assert all(p.rating_key == "42" for p in posters)
 
+    def test_falls_back_to_metadata_key(self):
+        """Older Plex versions return posters under 'Metadata' instead of 'Photo'."""
+        client, mock_session = _client_with_mock_session()
+        mock_session.get.return_value = _mock_response(
+            {
+                "MediaContainer": {
+                    "Metadata": [
+                        {
+                            "key": "upload://posters/abc",
+                            "selected": True,
+                            "provider": "local",
+                        }
+                    ]
+                }
+            }
+        )
+        posters = client.get_posters("42")
+        assert len(posters) == 1
+        assert posters[0].selected is True
+
     def test_invalid_rating_key_raises(self):
         client, _ = _client_with_mock_session()
         with pytest.raises(ValueError, match="Invalid Plex ID"):
