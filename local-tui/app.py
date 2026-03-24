@@ -14,6 +14,8 @@ or, if installed as an entry-point:
 
 from __future__ import annotations
 
+import platform
+import subprocess
 from pathlib import Path
 from typing import Optional, Set
 
@@ -187,6 +189,52 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
         self.dismiss(True)
 
 
+# ── OS clipboard helper ──────────────────────────────────────────────────────
+
+
+def _read_os_clipboard() -> str:
+    """
+    Read text from the OS clipboard using platform-native commands.
+
+    Textual's built-in ``action_paste`` reads from an internal clipboard that
+    is only populated when the user copies *within* Textual.  Tokens copied
+    from a browser or another application end up in the OS clipboard, which
+    this helper reaches via a subprocess call.  Returns an empty string on
+    any failure so the caller can silently fall back.
+    """
+    try:
+        system = platform.system()
+        if system == "Windows":
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            return result.stdout.strip()
+        if system == "Darwin":
+            result = subprocess.run(
+                ["pbpaste"], capture_output=True, text=True, timeout=3
+            )
+            return result.stdout.strip()
+        # Linux — try xclip then xsel
+        for cmd in (
+            ["xclip", "-selection", "clipboard", "-o"],
+            ["xsel", "--clipboard", "--output"],
+        ):
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=3
+                )
+                if result.returncode == 0:
+                    return result.stdout.strip()
+            except FileNotFoundError:
+                continue
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Modal — Plex connection
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -293,6 +341,24 @@ class PlexConnectScreen(ModalScreen[Optional[tuple]]):
     def _disconnect(self) -> None:
         self.dismiss(("disconnect",))
 
+    def action_paste(self) -> None:
+        """Paste from the OS clipboard into whichever input is focused.
+
+        Textual's default action_paste reads from an internal clipboard that
+        is empty when text was copied outside the app (e.g. a token from a
+        browser).  This override reads from the real OS clipboard so the user
+        can paste a Plex token with Ctrl+V just as they would anywhere else.
+        """
+        focused = self.focused
+        if not isinstance(focused, Input):
+            return
+        text = _read_os_clipboard()
+        if not text:
+            # Fall back to Textual's internal clipboard if OS read fails.
+            text = self.app.clipboard
+        if text:
+            focused.insert_text_at_cursor(text)
+
     @on(Button.Pressed, "#toggle-token")
     def _toggle_token(self) -> None:
         self._token_visible = not self._token_visible
@@ -318,13 +384,13 @@ class PlexConnectScreen(ModalScreen[Optional[tuple]]):
         try:
             client = PlexClient(base_url=url, token=token)
             name = client.test_connection()
-            self.call_from_thread(self._on_success, client, name)
+            self.app.call_from_thread(self._on_success, client, name)
         except PlexAuthError as exc:
-            self.call_from_thread(self._on_error, str(exc))
+            self.app.call_from_thread(self._on_error, str(exc))
         except PlexConnectionError as exc:
-            self.call_from_thread(self._on_error, str(exc))
+            self.app.call_from_thread(self._on_error, str(exc))
         except PlexError as exc:
-            self.call_from_thread(self._on_error, str(exc))
+            self.app.call_from_thread(self._on_error, str(exc))
 
     def _on_success(self, client: PlexClient, name: str) -> None:
         self.dismiss((client, name))
@@ -581,7 +647,7 @@ class PlexPosterApp(App):
         for child in node.children:
             yield from self._iter_bundle_nodes(child)
 
-    @work(exclusive=False, thread=True)
+    @work(exclusive=True, thread=True)
     def _fetch_plex_selections(self) -> None:
         """
         Background worker: for every scanned bundle with a ratingKey, ask Plex
@@ -786,7 +852,12 @@ class PlexPosterApp(App):
     def _refresh_indicators(self) -> None:
         table = self.query_one("#poster-table", DataTable)
         for poster in self._visible_posters:
-            indicator = _SEL if poster.path in self._selected else _UNS
+            if poster.is_plex_selected:
+                indicator = _ACT
+            elif poster.path in self._selected:
+                indicator = _SEL
+            else:
+                indicator = _UNS
             try:
                 table.update_cell(
                     str(poster.path), "sel", indicator, update_width=False
@@ -815,12 +886,13 @@ class PlexPosterApp(App):
 
     def _on_confirm(self, confirmed: bool) -> None:
         if confirmed:
-            self._do_delete()
+            # Snapshot on the main thread to avoid a race with concurrent
+            # mutations of _selected (e.g. _after_plex_fetch).
+            self._do_delete(list(self._selected))
 
     @work(thread=True)
-    def _do_delete(self) -> None:
+    def _do_delete(self, paths: list) -> None:
         """Delete selected files on a background thread, skipping protected ones."""
-        paths = list(self._selected)
         deleted = 0
         skipped = 0
         failed: list[str] = []

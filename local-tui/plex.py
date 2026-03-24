@@ -183,7 +183,7 @@ class PlexClient:
 
     def get_posters(self, rating_key: str) -> List[PlexPoster]:
         data = self._get(f"/library/metadata/{_safe_id(rating_key)}/posters")
-        meta = data.get("MediaContainer", {}).get("Metadata", [])
+        meta = data.get("MediaContainer", {}).get("Photo", [])
         return [
             PlexPoster(
                 key=m.get("key", ""),
