@@ -40,30 +40,82 @@ extension-less files by reading their magic bytes.  It also reads the
 
 ---
 
-## Requirements
+## Installation
 
-- **Python 3.10 or newer** (Python 3.12+ recommended)
-- All Python dependencies are installed automatically by `pip install .` — no
-  manual dependency management needed
-
-No Plex server connection is required for browsing and deleting — everything is
-read directly from disk.  The optional Plex connection (for active-poster
-protection) requires network access to your Plex server.
+There are two ways to install, depending on whether you want a self-contained
+executable you can run from anywhere, or a standard Python package install.
 
 ---
 
-## Installation
+### Option A — Standalone executable (recommended for most users)
 
-### 1 — Clone
+This builds a single `plex-poster.exe` (Windows) or `plex-poster` binary
+(macOS / Linux) that you can copy to any folder on your `PATH` and run from
+any terminal — no Python environment needed afterwards.
+
+**Requirements:** Python 3.10+ and Git (only needed for the build step).
+
+#### Windows
+
+```
+git clone https://github.com/djnw8fs748-eng/plex-poster-manager.git
+cd plex-poster-manager\local-tui
+build_exe.bat
+```
+
+The script creates a virtual environment, installs all dependencies, and runs
+PyInstaller automatically.  When it finishes, copy the executable to a folder
+on your `PATH`:
+
+```
+copy dist\plex-poster.exe C:\Windows\System32\
+```
+
+Then open **any** terminal window and type:
+
+```
+plex-poster
+```
+
+#### macOS / Linux
+
+```bash
+git clone https://github.com/djnw8fs748-eng/plex-poster-manager.git
+cd plex-poster-manager/local-tui
+chmod +x build_exe.sh
+./build_exe.sh
+```
+
+When the build finishes, copy the binary to a directory on your `$PATH`:
+
+```bash
+sudo cp dist/plex-poster /usr/local/bin/
+```
+
+Then run from any directory:
+
+```bash
+plex-poster
+```
+
+---
+
+### Option B — Python package install (for developers / frequent updaters)
+
+Use this if you want to run from source or update by pulling from Git.
+
+**Requirements:** Python 3.10 or newer.
+
+#### 1 — Clone
 
 ```
 git clone https://github.com/djnw8fs748-eng/plex-poster-manager.git
 cd plex-poster-manager/local-tui
 ```
 
-### 2 — Create a virtual environment and install
+#### 2 — Create a virtual environment and install
 
-**macOS / Linux** (required on modern macOS — system Python blocks direct installs):
+**macOS / Linux:**
 
 ```bash
 python3 -m venv .venv
@@ -79,23 +131,21 @@ python -m venv .venv
 pip install .
 ```
 
-This installs `textual`, `requests`, and everything else the app needs.
-
 > **Why a virtual environment?**  macOS (since Homebrew Python 3.12+) follows
 > [PEP 668](https://peps.python.org/pep-0668/) and refuses `pip install`
 > without a virtual environment.  Without one, `requests` is not installed,
 > the Plex integration silently fails, and the **Plex** option disappears from
 > the footer.  Always use the virtual environment.
 
-### 3 — Run
+#### 3 — Run
 
-With the virtual environment **activated** (see step 2):
+With the virtual environment **activated**:
 
 ```
 plex-poster
 ```
 
-Or run directly without activating:
+Or without activating:
 
 ```bash
 # macOS / Linux
@@ -105,42 +155,30 @@ Or run directly without activating:
 .venv\Scripts\plex-poster
 ```
 
-The app will **auto-detect** your Plex metadata folder on startup.  If it
-cannot find one it will immediately open the path-configuration dialog so you
-can enter the correct location.
-
 ---
 
 ## Updating the app
 
-When a new version is released, pull the latest code and reinstall.
+### If you used Option A (standalone executable)
+
+```
+cd plex-poster-manager/local-tui
+git pull
+```
+
+Then re-run `build_exe.bat` (Windows) or `./build_exe.sh` (macOS / Linux) and
+copy the new binary over the old one.
+
+### If you used Option B (Python package)
 
 **Windows:**
 
-1. Open **Windows Terminal** or **PowerShell** and navigate to the repo folder:
-
-   ```
-   cd path\to\plex-poster-manager\local-tui
-   ```
-
-2. Pull the latest changes from GitHub:
-
-   ```
-   git pull
-   ```
-
-3. Activate the virtual environment and reinstall:
-
-   ```
-   .venv\Scripts\activate
-   pip install .
-   ```
-
-4. Run the app as normal:
-
-   ```
-   plex-poster
-   ```
+```
+cd path\to\plex-poster-manager\local-tui
+git pull
+.venv\Scripts\activate
+pip install .
+```
 
 **macOS / Linux:**
 
@@ -149,7 +187,6 @@ cd path/to/plex-poster-manager/local-tui
 git pull
 source .venv/bin/activate
 pip install .
-plex-poster
 ```
 
 > **Note:** You do not need to uninstall the old version first — `pip install .`
@@ -174,9 +211,9 @@ plex-poster
 │     ▶ ...                    │                                                   │
 │                              │                                                   │
 ├──────────────────────────────┴───────────────────────────────────────────────────┤
-│ [Select All] [Select None]              1 poster selected  [Delete Selected]     │
+│ [Select All] [Select None] [Select All Unused]   47 posters selected (1.2 GB to free)  [Delete Selected] │
 └──────────────────────────────────────────────────────────────────────────────────┘
-  ^O Path  ^R Rescan  ^P Plex  Space Toggle  ^A All  Esc None  Del Delete  Q Quit
+  ^O Path  ^R Rescan  ^P Plex  Space Toggle  ^A All  ^U All Unused  Esc None  Del Delete  Q Quit
 ```
 
 **Left panel** — the folder tree.  Navigate with `↑`/`↓` and expand/collapse
@@ -190,7 +227,8 @@ name, size, last-modified date, and relative path.
 - `☑` — selected for deletion
 - `★` — **active in Plex** — protected, cannot be deleted
 
-**Action bar** — buttons and a running count of selected files at the bottom.
+**Action bar** — buttons, a running count of selected files, and the **total
+disk space that will be freed** when you delete the current selection.
 
 ---
 
@@ -203,6 +241,7 @@ name, size, last-modified date, and relative path.
 | `Enter` | Select a tree node **or** toggle a table row's selection |
 | `Space` | Toggle the highlighted table row's selection |
 | `Ctrl+A` | Select **all** non-protected posters in the current view |
+| `Ctrl+U` | Select **all unused** posters across the entire scanned tree |
 | `Esc` | Deselect all posters in the current view |
 | `Delete` | Open the delete-confirmation dialog |
 | `Ctrl+O` | Open the path-configuration dialog |
@@ -242,7 +281,7 @@ Your Plex auth token is needed to authenticate with the server:
 | Field | Default | Notes |
 |---|---|---|
 | Server URL | `http://localhost:32400` | Change if Plex runs on another machine |
-| Auth Token | Auto-detected on Windows | Paste manually on macOS / Linux |
+| Auth Token | Auto-detected on Windows | Paste manually on macOS / Linux — use `Ctrl+V` or click **Show** to verify |
 
 Click **Test & Connect** to verify the connection before saving.  The info bar
 at the top updates to show `Plex: <server name> (★ N protected)` once
@@ -261,14 +300,11 @@ The connection is **not** persisted between sessions — re-connect with
 3. **Optional but recommended:** Press `Ctrl+P`, enter your server URL and
    token, and click **Test & Connect**.  Active posters will be marked `★` and
    protected from deletion.
-4. Expand `Movies` or `TV Shows` in the left tree.  Folders now show the media
-   title instead of the raw bundle hash.
-5. Click a folder to see its cached posters on the right.  The **Media Item**
-   column shows which title each file belongs to.
-6. Use `Space`/`Enter` to select files you want to delete, or press `Ctrl+A`
-   to select everything in the current view (protected files are skipped).
-7. Press `Delete` (or click **Delete Selected**) and confirm when prompted.
-8. The app rescans automatically and updates the tree and table.
+4. Press `Ctrl+U` (**Select All Unused**) to select every non-protected poster
+   across the entire library in one go.  The action bar shows the total size
+   that will be freed (e.g. `142 posters selected (4.7 GB to free)`).
+5. Review the count, then press `Delete` and confirm to remove everything.
+6. The app rescans automatically and updates the tree and table.
 
 > **Tip:** Plex will re-download metadata the next time you refresh a library
 > section, so deleting cached posters is safe — your selections in Plex are
@@ -296,10 +332,12 @@ Press `Ctrl+O` at any time to open the path dialog.  You can point the app at:
 | `Permission denied` errors | On Windows, close Plex Media Server before deleting files from its cache |
 | Plex connection fails | Verify the URL includes the port (`:32400`) and the token is correct |
 | `★` protection not showing | Plex connection required — press `Ctrl+P` to connect |
-| **Plex option missing from footer** | `requests` not installed — create and use a virtual environment (see Installation step 2) |
+| `Ctrl+V` doesn't paste the token | Click **Show** to reveal the field, then paste; the app reads directly from the OS clipboard |
+| **Plex option missing from footer** | `requests` not installed — use a virtual environment (Option B step 2) or rebuild the exe (Option A) |
 | `textual` not found | Activate the virtual environment and run `pip install .` |
-| `requests` not found | Activate the virtual environment and run `pip install .` |
 | App display looks broken | Use a terminal that supports Unicode and at least 80 columns (Windows Terminal, iTerm2, etc.) |
+| `build_exe.bat` fails with "Python not found" | Install Python 3.10+ and ensure it is on your `PATH` |
+| PyInstaller build fails | Run `pip install ".[dev]"` inside the venv first, then retry |
 
 ---
 
@@ -320,11 +358,15 @@ pytest
 - **Active poster protection** — when connected to Plex, the currently
   selected poster for each item is identified via the API and blocked from
   deletion entirely.
+- **Space freed estimate** — the action bar shows the total size of all
+  selected files in real time so you know exactly how much disk space will
+  be recovered before you confirm.
 - **Extensionless files** — Plex sometimes stores posters without a file
   extension.  The scanner detects these by reading their magic bytes (JPEG,
   PNG, WebP, GIF signatures).
-- **Media titles** — resolved from `Info.xml` inside each `.bundle` directory
-  at scan time.  No server connection is needed for this.
+- **Media titles** — resolved from `Info.xml` or the Plex SQLite database
+  inside each `.bundle` directory at scan time.  No server connection is
+  needed for this.
 - After deleting cached posters, Plex will show the correct poster for each
   item because the *selected* poster information is stored in its SQLite
   database (`com.plexapp.plugins.library.db`), not in the image files.
