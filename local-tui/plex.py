@@ -183,7 +183,11 @@ class PlexClient:
 
     def get_posters(self, rating_key: str) -> List[PlexPoster]:
         data = self._get(f"/library/metadata/{_safe_id(rating_key)}/posters")
-        meta = data.get("MediaContainer", {}).get("Photo", [])
+        container = data.get("MediaContainer", {})
+        # Plex returns poster objects under "Photo" in JSON (matching the
+        # XML <Photo> element).  Some older Plex versions use "Metadata"
+        # instead.  Try both so the client works across server versions.
+        meta = container.get("Photo") or container.get("Metadata") or []
         return [
             PlexPoster(
                 key=m.get("key", ""),

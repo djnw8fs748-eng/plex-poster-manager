@@ -672,12 +672,28 @@ class PlexPosterApp(App):
                 if not api_poster.selected:
                     continue
                 short = api_poster.short_key
-                # Match by filename — Plex stores extensionless cache files
-                # whose name equals the poster hash in the upload:// URL.
-                for pf in bundle_node.all_posters():
+                bundle_posters = bundle_node.all_posters()
+                matched = False
+                # Pass 1 — exact filename match.
+                # Works for upload://posters/{hash} keys where the disk file
+                # is stored extensionless with the hash as its name.
+                for pf in bundle_posters:
                     if pf.path.name == short:
                         pf.is_plex_selected = True
                         protected.add(pf.path)
+                        matched = True
+                if not matched:
+                    # Pass 2 — stem match.
+                    # Handles external-URL keys (TMDB, Fanart, etc.) where
+                    # short_key is e.g. "abc.jpg" but the disk file is stored
+                    # extensionless as "abc".
+                    stem = Path(short).stem
+                    if stem:
+                        for pf in bundle_posters:
+                            if pf.path.stem == stem:
+                                pf.is_plex_selected = True
+                                protected.add(pf.path)
+                                matched = True
 
         self.call_from_thread(self._after_plex_fetch, protected)
 
@@ -886,19 +902,19 @@ class PlexPosterApp(App):
 
     def _on_confirm(self, confirmed: bool) -> None:
         if confirmed:
-            # Snapshot on the main thread to avoid a race with concurrent
-            # mutations of _selected (e.g. _after_plex_fetch).
-            self._do_delete(list(self._selected))
+            # Snapshot both sets on the main thread to avoid races with
+            # concurrent mutations from _after_plex_fetch / _start_scan.
+            self._do_delete(list(self._selected), set(self._plex_protected))
 
     @work(thread=True)
-    def _do_delete(self, paths: list) -> None:
+    def _do_delete(self, paths: list, protected: set) -> None:
         """Delete selected files on a background thread, skipping protected ones."""
         deleted = 0
         skipped = 0
         failed: list[str] = []
 
         for path in paths:
-            if path in self._plex_protected:
+            if path in protected:
                 skipped += 1
                 continue
             try:
